@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>💎 돌 캐기 타이쿤: 레이아웃 리마스터</title>
+<style>
+    :root {
+        --primary-blue: #e0f7ff;
+        --accent-blue: #01579b;
+        --panel-bg: #ffffff;
+        --grid-bg: #b3e5fc;
+        --border-color: #81d4fa;
+    }
+
+    body { 
+        font-family: 'Malgun Gothic', sans-serif; 
+        background: var(--primary-blue); 
+        color: #333; margin: 0; padding: 20px;
+        user-select: none;
+    }
+
+    .status-bar {
+        background: white; padding: 15px 30px;
+        border-radius: 50px; margin-bottom: 25px; 
+        font-size: 1.5rem; font-weight: bold;
+        display: inline-block; box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        color: var(--accent-blue);
+    }
+
+    /* 메인 게임 광산 그리드 */
+    #mine-grid {
+        display: grid; grid-template-columns: repeat(8, 70px); gap: 8px;
+        justify-content: center; margin: 0 auto;
+        background: var(--grid-bg); padding: 15px; border-radius: 20px;
+        width: fit-content;
+        box-shadow: inset 0 0 10px rgba(0,0,0,0.1);
+    }
+    .cell {
+        width: 70px; height: 70px; background: #fff; border-radius: 12px;
+        cursor: pointer; display: flex; justify-content: center; align-items: center;
+        transition: 0.1s;
+    }
+    .cell:active { transform: scale(0.9); }
+    .cell img { width: 50px; height: 50px; pointer-events: none; }
+
+    /* 사이드 아이콘 메뉴 */
+    .side-menu {
+        position: fixed; right: 30px; top: 50%; transform: translateY(-50%);
+        display: flex; flex-direction: column; gap: 20px; z-index: 50;
+    }
+    .menu-icon {
+        width: 70px; height: 70px; background: white;
+        border: 3px solid var(--border-color); border-radius: 15px;
+        cursor: pointer; display: flex; justify-content: center; align-items: center;
+        box-shadow: 0 6px 12px rgba(0,0,0,0.1); transition: 0.2s;
+    }
+    .menu-icon:hover { transform: translateX(-5px); }
+    .menu-icon img { width: 50px; height: 50px; }
+
+    /* 모달 시스템 (바깥 클릭 종료 포함) */
+    .modal-overlay {
+        display: none; position: fixed; top: 0; left: 0;
+        width: 100%; height: 100%; background: rgba(0,0,0,0.3);
+        z-index: 100;
+    }
+    .modal {
+        position: absolute; top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        background: white; border: 4px solid var(--border-color);
+        border-radius: 25px; padding: 30px;
+        min-width: 650px; /* 인벤토리 너비 보장 */
+        box-shadow: 0 15px 50px rgba(0,0,0,0.2);
+    }
+
+    /* 🎒 인벤토리 & 조합 레이아웃 */
+    .inv-container-wrapper { 
+        display: flex; 
+        gap: 30px; 
+        align-items: flex-start;
+    }
+    
+    /* 1. 인벤토리 섹션 (좌측) */
+    .inv-section { flex: 1; min-width: 400px; }
+    .inv-grid {
+        display: grid; 
+        grid-template-columns: repeat(6, 1fr); /* 6칸 균등 배분 */
+        gap: 10px;
+        background: #f9f9f9; padding: 15px; border-radius: 15px;
+        border: 2px solid #eee;
+        box-sizing: border-box; /* 너비 계산 오류 방지 */
+    }
+    .slot {
+        aspect-ratio: 1 / 1; /* 정사각형 유지 */
+        background: white; border: 2px solid #e0e0e0; border-radius: 10px;
+        display: flex; justify-content: center; align-items: center;
+        position: relative; cursor: pointer; transition: 0.2s;
+    }
+    .slot:hover { border-color: var(--accent-blue); background: #f0faff; }
+    .slot img { width: 80%; height: 80%; object-fit: contain; }
+    .slot-count {
+        position: absolute; bottom: 3px; right: 6px;
+        font-size: 11px; font-weight: bold; color: #555;
+        background: rgba(255,255,255,0.7); border-radius: 4px; padding: 0 2px;
+    }
+
+    /* 2. 조합소 섹션 (우측) */
+    .craft-section {
+        width: 200px; flex-shrink: 0; background: #f0faff; 
+        padding: 25px 20px; border-radius: 20px;
+        border: 2px solid var(--border-color); text-align: center;
+        box-sizing: border-box;
+    }
+    .craft-display { display: flex; flex-direction: column; align-items: center; gap: 15px; margin: 15px 0; }
+    .craft-box {
+        width: 80px; height: 80px; background: white;
+        border: 3px solid var(--accent-blue); border-radius: 15px;
+        display: flex; justify-content: center; align-items: center;
+        font-size: 32px; color: #eee; position: relative;
+    }
+    .craft-box img { width: 80%; height: 80%; object-fit: contain; }
+
+    /* 버튼류 */
+    .btn-group { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+    button {
+        padding: 12px; border: none; border-radius: 12px;
+        background: var(--accent-blue); color: white;
+        font-weight: bold; cursor: pointer; transition: 0.2s;
+    }
+    button:hover:not(:disabled) { background: #01417a; transform: translateY(-2px); }
+    button.sell-btn { background: #4caf50; width: 100%; margin-top: 15px; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+</style>
+</head>
+<body>
+
+<center>
+    <div class="status-bar">💰 <span id="money-display">0</span> 원</div>
+</center>
+
+<div id="mine-grid"></div>
+
+<div class="side-menu">
+    <div class="menu-icon" onclick="openModal('inventory-overlay')">
+        <img src="inv_icon.png" alt="🎒">
+    </div>
+</div>
+
+<div id="inventory-overlay" class="modal-overlay" onclick="closeByOverlay(event)">
+    <div class="modal">
+        <div class="inv-container-wrapper">
+            <div class="inv-section">
+                <h3 style="margin-top:0; color:var(--accent-blue); display: flex; align-items: center; gap: 8px;">
+                    🎒 내 가방
+                </h3>
+                <div class="inv-grid" id="inv-container"></div>
+                <button onclick="sellAll()" class="sell-btn">💰 가방 안 모든 광물 판매</button>
+            </div>
+
+            <div class="craft-section">
+                <h3 style="margin-top:0; color:var(--accent-blue);">🔨 조합소</h3>
+                <div class="craft-display">
+                    <div id="slot-a" class="craft-box">+</div>
+                    <div style="font-size: 24px; color: var(--accent-blue);">⬇️</div>
+                    <div id="slot-result" class="craft-box">?</div>
+                </div>
+                <div class="btn-group">
+                    <button id="btn-craft" onclick="confirmCraft()" disabled>조합 완료</button>
+                    <button onclick="clearCraft()" style="background:#ff7675;">전체 비우기</button>
+                </div>
+                <p style="font-size:11px; color:#7f8c8d; margin-top:15px; line-height: 1.4;">
+                    광물을 <b>꾹~ 누르면</b><br>자동으로 투입됩니다!
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const minerals = [
+    { name: "돌", price: 1, img: "돌.png" },
+    { name: "큰 돌", price: 5, img: "큰 돌.png" },
+    { name: "화강암", price: 15, img: "화강암.png" },
+    { name: "구리", price: 40, img: "구리.png" },
+    { name: "철", price: 100, img: "철.png" },
+    { name: "금", price: 300, img: "금.png" },
+    { name: "크리스탈", price: 800, img: "크리스탈.png" },
+    { name: "사파이어", price: 2000, img: "사파이어.png" },
+    { name: "에메랄드", price: 5000, img: "에메랄드.png" },
+    { name: "다이아몬드", price: 15000, img: "다이아몬드.png" },
+    { name: "기반암", price: 50000, img: "기반암.png" },
+    { name: "전설의 돌", price: 150000, img: "전설.png" },
+    { name: "우주의 돌", price: 500000, img: "우주.png" },
+    { name: "유물", price: 2000000, img: "유물.png" }
+];
+
+let state = {
+    money: 0,
+    inventory: minerals.map(() => 0),
+    crafting: { type: null, count: 0 }
+};
+
+const grid = [];
+const gridEl = document.getElementById("mine-grid");
+
+function init() {
+    for (let i = 0; i < 64; i++) {
+        grid.push({ type: null, hp: 0 });
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        cell.onclick = () => mine(i);
+        gridEl.appendChild(cell);
+    }
+    updateUI();
+}
+
+function openModal(id) { document.getElementById(id).style.display = 'block'; }
+function closeModal(id) { stopHold(); document.getElementById(id).style.display = 'none'; }
+function closeByOverlay(e) { if (e.target.classList.contains('modal-overlay')) closeModal(e.target.id); }
+
+function mine(i) {
+    if (grid[i].hp <= 0) return;
+    grid[i].hp -= 1;
+    if (grid[i].hp <= 0) {
+        state.inventory[grid[i].type]++;
+        grid[i].type = null;
+        renderCell(i);
+        updateUI();
+    }
+}
+
+function spawn() {
+    const empty = grid.map((c, i) => c.hp <= 0 ? i : null).filter(v => v !== null);
+    if (!empty.length) return;
+    const target = empty[Math.floor(Math.random() * empty.length)];
+    grid[target] = { type: 0, hp: 3 };
+    renderCell(target);
+}
+
+function renderCell(i) {
+    const cell = gridEl.children[i];
+    cell.innerHTML = grid[i].hp > 0 ? `<img src="${minerals[grid[i].type].img}" onerror="this.style.opacity='0'">` : "";
+}
+
+// --- 꾹 누르기 투입 기능 ---
+let holdTimer;
+function startHold(type) {
+    moveOne(type); 
+    holdTimer = setInterval(() => moveOne(type), 120); 
+}
+function stopHold() { clearInterval(holdTimer); }
+
+function moveOne(type) {
+    if (state.inventory[type] <= 0) { stopHold(); return; }
+    if (state.crafting.type !== null && state.crafting.type !== type) return;
+    
+    state.inventory[type]--;
+    state.crafting.type = type;
+    state.crafting.count++;
+    updateUI();
+}
+
+function clearCraft() {
+    if (state.crafting.type !== null) {
+        state.inventory[state.crafting.type] += state.crafting.count;
+        state.crafting = { type: null, count: 0 };
+        updateUI();
+    }
+}
+
+function confirmCraft() {
+    if (state.crafting.count < 2) return;
+    const resType = state.crafting.type + 1;
+    const resCount = Math.floor(state.crafting.count / 2);
+    const remain = state.crafting.count % 2;
+    
+    if(resType < minerals.length) state.inventory[resType] += resCount;
+    state.inventory[state.crafting.type] += remain;
+    
+    state.crafting = { type: null, count: 0 };
+    updateUI();
+}
+
+function sellAll() {
+    state.inventory.forEach((count, i) => {
+        state.money += count * minerals[i].price;
+        state.inventory[i] = 0;
+    });
+    updateUI();
+}
+
+function updateUI() {
+    document.getElementById("money-display").innerText = state.money.toLocaleString();
+    const container = document.getElementById("inv-container");
+    container.innerHTML = "";
+    
+    // 18칸 고정 슬롯 생성 (6x3)
+    for(let i=0; i<18; i++) {
+        const slot = document.createElement("div");
+        slot.className = "slot";
+        if (minerals[i] && (state.inventory[i] > 0 || i === 0)) {
+            slot.innerHTML = `
+                <img src="${minerals[i].img}" onerror="this.style.opacity='0.2'">
+                <div class="slot-count">${state.inventory[i]}</div>
+            `;
+            slot.onmousedown = () => startHold(i);
+            slot.onmouseup = stopHold;
+            slot.onmouseleave = stopHold;
+        }
+        container.appendChild(slot);
+    }
+
+    const slotA = document.getElementById("slot-a");
+    const slotResult = document.getElementById("slot-result");
+    const btn = document.getElementById("btn-craft");
+
+    if (state.crafting.count > 0) {
+        slotA.innerHTML = `<img src="${minerals[state.crafting.type].img}"><div class="slot-count">${state.crafting.count}</div>`;
+        if (state.crafting.count >= 2 && state.crafting.type < minerals.length - 1) {
+            slotResult.innerHTML = `<img src="${minerals[state.crafting.type+1].img}">`;
+            btn.disabled = false;
+        } else {
+            slotResult.innerText = "?";
+            btn.disabled = true;
+        }
+    } else {
+        slotA.innerText = "+";
+        slotResult.innerText = "?";
+        btn.disabled = true;
+    }
+}
+
+setInterval(spawn, 1000);
+init();
+</script>
+</body>
+</html>
