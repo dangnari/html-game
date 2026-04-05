@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>네모의 신나는 점프게임!</title>
+    <title>네모의 우주가기 모험!</title>
     <style>
         body {
             margin: 0; overflow: hidden; background: #1a1a1a; 
@@ -20,7 +20,7 @@
             position: absolute; bottom: 30px; width: 400px; height: 10px;
             background: #444; border-radius: 5px; overflow: hidden; border: 1px solid #666;
         }
-        #powerBar { width: 0%; height: 100%; background: linear-gradient(to right, #2ecc71, #f1c40f, #e74c3c); }
+        #powerBar { width: 0%; height: 100%; background: linear-gradient(to right, #2ecc71, #f1c40f, #e74c3c); transition: width 0.05s linear; }
         #nameInputOverlay {
             display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(0, 0, 0, 0.9); padding: 30px; border-radius: 15px; border: 2px solid #f1c40f;
@@ -47,43 +47,38 @@
     </div>
 
     <div id="nameInputOverlay">
-        <h2 style="color: #f1c40f; margin-top:0;">그나마 가장 높게 간 새끼!</h2>
-        <p>이름이 뭐임</p>
+        <h2 style="color: #f1c40f; margin-top:0;">와 신기록 어캐했노!</h2>
+        <p>기록할 이름 넣으삼.</p>
         <input type="text" id="nicknameInput" maxlength="8" placeholder="최대 8자">
         <br>
-        <button onclick="saveHighScore()">관등성명하기</button>
+        <button id="saveBtn">기록 저장</button>
     </div>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { alpha: false }); // 성능 최적화: 알파 채널 비활성화
         const powerBar = document.getElementById('powerBar');
         const currentScoreElem = document.getElementById('currentScore');
         const bestScoreElem = document.getElementById('bestScore');
         const bestNameDisplay = document.getElementById('bestNameDisplay');
         const nameInputOverlay = document.getElementById('nameInputOverlay');
         const nicknameInput = document.getElementById('nicknameInput');
+        const saveBtn = document.getElementById('saveBtn');
 
         const config = {
             gravity: 0.28,
             friction: 0.7,
             maxPower: 16,
             jumpFactor: 1.1,
-            scrollThreshold: 300
+            scrollThreshold: 300,
+            platformGap: 120
         };
 
         let player, platforms, score, bestScore, bestName, keys, isGameOver, waitingForName;
 
-        // [핵심] 페이지 로드 시 즉시 데이터 불러오기
-        loadData();
-
         function loadData() {
             bestScore = parseInt(localStorage.getItem('jumpKingBestScore')) || 0;
             bestName = localStorage.getItem('jumpKingBestName') || "없음";
-            updateBestDisplay();
-        }
-
-        function updateBestDisplay() {
             bestScoreElem.innerText = `${bestScore}m`;
             bestNameDisplay.innerText = `기록자: ${bestName}`;
         }
@@ -100,10 +95,8 @@
             waitingForName = false;
             nameInputOverlay.style.display = 'none';
 
-            for(let i = 0; i < 6; i++) spawnPlatform(500 - (i * 120));
+            for(let i = 0; i < 6; i++) spawnPlatform(500 - (i * config.platformGap));
             currentScoreElem.innerText = `0m`;
-            
-            // 매 시작마다 최고 기록 다시 확인 (동기화)
             loadData();
         }
 
@@ -113,49 +106,42 @@
             platforms.push({ x, y: yValue, w: width, h: 15 });
         }
 
+        // 입력 최적화
         window.addEventListener('keydown', (e) => {
             if (waitingForName) return;
-            if (isGameOver) { init(); return; }
+            if (isGameOver && e.code === 'Enter') { init(); return; }
+            if (e.code === 'Space') {
+                e.preventDefault(); // 스크롤 방지
+                if (!player.isJumping) player.charging = true;
+            }
             keys[e.code] = true;
-            if (e.code === 'Space' && !player.isJumping) player.charging = true;
         });
 
         window.addEventListener('keyup', (e) => {
-            if (waitingForName) return;
-            if (e.code === 'Space' && player.charging) launch();
+            if (e.code === 'Space' && player.charging) {
+                launch();
+            }
             keys[e.code] = false;
         });
 
         function launch() {
             player.vy = -player.power * config.jumpFactor;
-            if (keys['ArrowLeft']) player.vx = -player.power * 0.4;
-            else if (keys['ArrowRight']) player.vx = player.power * 0.4;
-            else player.vx = 0;
+            player.vx = (keys['ArrowLeft'] ? -1 : keys['ArrowRight'] ? 1 : 0) * (player.power * 0.4);
             player.isJumping = true;
             player.charging = false;
             player.power = 0;
         }
 
-        // [핵심] 기록 영구 저장 함수
-        function saveHighScore() {
+        saveBtn.onclick = () => {
             const newName = nicknameInput.value.trim() || "익명";
-            
-            // 로컬 스토리지에 데이터 쓰기
             localStorage.setItem('jumpKingBestScore', score);
             localStorage.setItem('jumpKingBestName', newName);
-            
-            // 변수 업데이트 및 UI 반영
-            bestScore = score;
-            bestName = newName;
-            updateBestDisplay();
-
-            waitingForName = false;
-            nameInputOverlay.style.display = 'none';
+            loadData();
             init();
-        }
+        };
 
         function update() {
-            if (isGameOver || waitingForName) { draw(); requestAnimationFrame(update); return; }
+            if (isGameOver || waitingForName) return;
 
             if (player.charging) {
                 player.power = Math.min(player.power + 0.25, config.maxPower);
@@ -169,39 +155,47 @@
                 player.x += player.vx;
                 player.y += player.vy;
 
+                // 벽 충돌
                 if (player.x <= 0 || player.x + player.width >= canvas.width) {
                     player.vx *= -config.friction;
                     player.x = player.x <= 0 ? 0 : canvas.width - player.width;
                 }
             }
 
+            // 카메라 스크롤 최적화
             if (player.y < config.scrollThreshold) {
                 let diff = config.scrollThreshold - player.y;
                 player.y += diff;
-                platforms.forEach(p => p.y += diff);
-                score += Math.floor(diff / 10);
+                for (let i = 0; i < platforms.length; i++) {
+                    platforms[i].y += diff;
+                }
+                score += Math.round(diff / 10);
                 currentScoreElem.innerText = `${score}m`;
             }
 
-            platforms = platforms.filter(p => p.y < canvas.height + 100);
+            // 플랫폼 재활용 로직 (메모리 관리)
+            if (platforms[0].y > canvas.height + 100) platforms.shift();
             while (platforms[platforms.length - 1].y > -100) {
-                spawnPlatform(platforms[platforms.length - 1].y - 120);
+                spawnPlatform(platforms[platforms.length - 1].y - config.platformGap);
             }
 
+            // 충돌 판정
             let wasOnPlatform = false;
-            for (let p of platforms) {
-                if (player.vy > 0 && 
-                    player.x + player.width > p.x && player.x < p.x + p.w &&
-                    player.y + player.height > p.y && player.y + player.height < p.y + p.h + player.vy) {
-                    player.isJumping = false;
-                    player.vy = 0; player.vx = 0;
-                    player.y = p.y - player.height;
-                    wasOnPlatform = true;
-                    break;
+            if (player.vy >= 0) { // 내려올 때만 검사
+                for (let p of platforms) {
+                    if (player.x + player.width > p.x && player.x < p.x + p.w &&
+                        player.y + player.height > p.y && player.y + player.height < p.y + p.h + player.vy) {
+                        player.isJumping = false;
+                        player.vy = 0; player.vx = 0;
+                        player.y = p.y - player.height;
+                        wasOnPlatform = true;
+                        break;
+                    }
                 }
             }
             if (!wasOnPlatform && !player.charging) player.isJumping = true;
 
+            // 사망 판정
             if (player.y > canvas.height) {
                 if (score > bestScore && score > 0) {
                     waitingForName = true;
@@ -211,21 +205,20 @@
                     isGameOver = true;
                 }
             }
-
-            draw();
-            requestAnimationFrame(update);
         }
 
         function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // 배경 칠하기
+            ctx.fillStyle = "#2c3e50";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
             
+            // 발판 그리기 (동일 색상 묶어서 처리)
             ctx.fillStyle = "#7f8c8d";
-            platforms.forEach(p => {
+            for (let p of platforms) {
                 ctx.fillRect(p.x, p.y, p.w, p.h);
-                ctx.fillStyle = "#95a5a6";
-                ctx.fillRect(p.x, p.y, p.w, 3);
-            });
+            }
 
+            // 플레이어 차징 색상 계산
             let playerColor = "#3498db"; 
             if (player.charging) {
                 const ratio = player.power / config.maxPower;
@@ -239,22 +232,24 @@
             ctx.fillStyle = playerColor;
             ctx.fillRect(player.x + shake, player.y + shake, player.width, player.height);
             
+            // 눈 그리기
             ctx.fillStyle = "white";
-            let eye = (keys['ArrowLeft'] ? -4 : (keys['ArrowRight'] ? 4 : 0));
-            ctx.fillRect(player.x + 8 + eye + shake, player.y + 8 + shake, 5, 5);
-            ctx.fillRect(player.x + 18 + eye + shake, player.y + 8 + shake, 5, 5);
+            let eyeX = (keys['ArrowLeft'] ? -4 : (keys['ArrowRight'] ? 4 : 0));
+            ctx.fillRect(player.x + 8 + eyeX + shake, player.y + 8 + shake, 5, 5);
+            ctx.fillRect(player.x + 18 + eyeX + shake, player.y + 8 + shake, 5, 5);
 
+            // 게임 오버 화면
             if (isGameOver && !waitingForName) {
                 ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.fillStyle = "white";
                 ctx.textAlign = "center";
                 
+                ctx.fillStyle = "white";
                 ctx.font = "bold 70px 'Malgun Gothic'";
                 ctx.fillText("병신새끼", canvas.width/2, canvas.height/2 - 40);
                 
-                ctx.font = "bold 20px 'Malgun Gothic'";
                 ctx.fillStyle = "#e74c3c";
+                ctx.font = "bold 20px 'Malgun Gothic'";
                 ctx.fillText("갓 태어난 아기가 너보단 잘하겠다 와", canvas.width/2, canvas.height/2 + 10);
                 
                 ctx.fillStyle = "white";
@@ -263,8 +258,14 @@
             }
         }
 
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
         init();
-        update();
+        loop();
     </script>
 </body>
 </html>
