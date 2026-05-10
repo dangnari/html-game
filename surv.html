@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Vampire Survivors - Fixed Edition</title>
+    <style>
+        body { margin: 0; background: #1a1a1a; color: white; font-family: 'Malgun Gothic', sans-serif; overflow: hidden; }
+        canvas { display: block; background: #2d2d2d; margin: 0 auto; outline: 4px solid #555; }
+        
+        #ui-layer { position: absolute; top: 15px; left: 20px; width: calc(100% - 40px); pointer-events: none; display: flex; justify-content: space-between; align-items: flex-start; z-index: 10; }
+        .heart { color: #ff4d4d; font-size: 24px; text-shadow: 2px 2px #000; }
+        #timer { font-size: 24px; font-weight: bold; background: rgba(0,0,0,0.7); padding: 5px 15px; border-radius: 10px; border: 2px solid #fff; }
+        
+        .overlay { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            background: rgba(0,0,0,0.95); border: 4px solid #fff; padding: 20px; 
+            display: none; text-align: center; width: 85%; max-width: 800px; z-index: 100; pointer-events: auto; 
+        }
+        #options-list { display: flex; justify-content: center; gap: 15px; margin-top: 20px; }
+        .option-card { 
+            background: #333; border: 2px solid #777; padding: 15px; width: 180px; cursor: pointer; 
+            transition: all 0.2s; display: flex; flex-direction: column; align-items: center;
+        }
+        .option-card:hover { transform: translateY(-10px); border-color: #ffd700; background: #444; }
+        .option-card img { width: 70px; height: 70px; margin-bottom: 10px; border-radius: 8px; background: #222; }
+        
+        #pause-screen { background: rgba(0,0,0,0.5); border: none; }
+        button { background: #444; color: white; border: 1px solid #fff; padding: 10px 20px; cursor: pointer; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div>
+            <div id="hp-container" class="heart"></div>
+            <div style="width: 250px; height: 10px; background: #444; border: 1px solid #fff; margin-top: 5px; border-radius: 5px; overflow: hidden;">
+                <div id="exp-bar" style="width: 0%; height: 100%; background: #ffeb3b;"></div>
+            </div>
+            <div style="margin-top:5px; font-weight: bold;">Lv: <span id="lvl-txt">1</span></div>
+        </div>
+        <div id="timer">00:00</div>
+    </div>
+
+    <!-- 일시정지 화면 -->
+    <div id="pause-screen" class="overlay">
+        <h1 style="font-size: 48px; color: #fff;">왐마 일단 정지</h1>
+        <p>Space bar를 눌러 계속해용</p>
+    </div>
+
+    <!-- 스킬 선택 모달 -->
+    <div id="level-up-modal" class="overlay">
+        <h2 id="modal-title" style="color:#ffd700; margin: 0;">스킬 및 패시브 선택</h2>
+        <div id="options-list"></div>
+    </div>
+
+    <!-- 게임오버 화면 -->
+    <div id="game-over" class="overlay">
+        <h1 style="color: #ff4d4d;">뒤짐</h1>
+        <p id="survival-result"></p>
+        <button onclick="location.reload()">다시 시작</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+let isPaused = false, isGameOver = false, frame = 0, startTime = Date.now(), pausedTime = 0, lastPauseStart = 0;
+const enemies = [], projectiles = [], drops = [], keys = {};
+
+const player = {
+    x: canvas.width / 2, y: canvas.height / 2,
+    hp: 4, maxHp: 4, level: 1, exp: 0, nextExp: 60,
+    speed: 3.5, magnet: 150, atk_increase: 1, atk_speed: 1, projectile_add: 0,
+    invinc: false,
+    skills: { fireball: 0, beam: 0, boomerang: 0, aura: 0, shuriken: 0 },
+    passives: { atk_count: 0, max_health: 0, atk_increase: 0, movement_speed: 0, magnet: 0, atk_speed: 0 }
+};
+
+const ALL_CHOICES = {
+    atk_count: { name: "투사체 증가", desc: "모든 공격의 탄환 갯수가 늘어납니다.", img: "atk_count.png", type: "passive" },
+    max_health: { name: "체력 증가", desc: "최대 체력(하트)을 +1 합니다.", img: "max_health.png", type: "passive" },
+    atk_increase: { name: "공격력 증가", desc: "모든 공격의 데미지가 강해집니다.", img: "atk_increase.png", type: "passive" },
+    movement_speed: { name: "이동속도 증가", desc: "캐릭터의 이동속도가 증가합니다.", img: "movement_speed.png", type: "passive" },
+    magnet: { name: "자석", desc: "경험치 획득 범위가 넓어집니다.", img: "magnet.png", type: "passive" },
+    atk_speed: { name: "공격속도 증가", desc: "공격 사이의 대기시간이 줄어듭니다.", img: "atk_speed.png", type: "passive" },
+    fireball: { name: "파이어볼", desc: "관통하는 강력한 불덩이를 쏩니다.", img: "fire_ball.png", type: "skill" },
+    beam: { name: "빔", desc: "상하좌우로 맵 끝까지 닿는 빔을 쏩니다.", img: "beam.png", type: "skill" },
+    boomerang: { name: "부메랑", desc: "가까운 적에게 던져 되돌아옵니다.", img: "boomerang.png", type: "skill" },
+    aura: { name: "오오라", desc: "주변 적에게 지속적으로 피해를 줍니다.", img: "aurora.png", type: "skill" },
+    shuriken: { name: "표창", desc: "적에게 빠르게 표창을 난사합니다.", img: "shuriken.png", type: "skill" }
+};
+
+// --- 일시정지 제어 ---
+function togglePause() {
+    if (isGameOver || document.getElementById('level-up-modal').style.display === 'block') return;
+    isPaused = !isPaused;
+    if (isPaused) {
+        lastPauseStart = Date.now();
+        document.getElementById('pause-screen').style.display = 'block';
+    } else {
+        pausedTime += (Date.now() - lastPauseStart);
+        document.getElementById('pause-screen').style.display = 'none';
+    }
+}
+
+function showRewardModal(title = "레벨 업!") {
+    isPaused = true;
+    lastPauseStart = Date.now();
+    document.getElementById('level-up-modal').style.display = 'block';
+    document.getElementById('modal-title').innerText = title;
+    const list = document.getElementById('options-list');
+    list.innerHTML = '';
+    const picks = Object.keys(ALL_CHOICES).sort(() => 0.5 - Math.random()).slice(0, 3);
+    picks.forEach(key => {
+        const item = ALL_CHOICES[key];
+        const card = document.createElement('div');
+        card.className = 'option-card';
+        card.innerHTML = `<img src="${item.img}" onerror="this.style.backgroundColor='#444'"><div class="option-name">${item.name}</div><div class="option-desc">${item.desc}</div>`;
+        card.onclick = () => {
+            if (item.type === "skill") player.skills[key]++;
+            else {
+                player.passives[key]++;
+                if (key === "max_health") { player.maxHp++; player.hp++; }
+                if (key === "movement_speed") player.speed += 0.4;
+                if (key === "magnet") player.magnet += 60;
+                if (key === "atk_increase") player.atk_increase += 0.2;
+                if (key === "atk_speed") player.atk_speed += 0.2;
+                if (key === "atk_count") player.projectile_add += 1;
+            }
+            document.getElementById('level-up-modal').style.display = 'none';
+            pausedTime += (Date.now() - lastPauseStart);
+            isPaused = false;
+        };
+        list.appendChild(card);
+    });
+}
+
+// --- 투사체 발사 (정면 조준 및 뒤따라오기 로직) ---
+function fireGuidedProjectiles(type, target, spd, size, dmg, pierce, col) {
+    let count = 1 + player.projectile_add;
+    if (type === 'fireball' && player.skills.fireball === 10) count += 2;
+    if (type === 'shuriken' && player.skills.shuriken === 10) count += 4;
+
+    for (let i = 0; i < count; i++) {
+        // 첫 발은 정중앙, 나머지는 아주 약간의 시차와 좁은 각도로 뒤따라가게 함
+        setTimeout(() => {
+            if (isPaused) return;
+            const a = Math.atan2(target.y - player.y, target.x - player.x) + (i * 0.05 * (i % 2 === 0 ? 1 : -1));
+            projectiles.push({
+                x: player.x, y: player.y,
+                vx: Math.cos(a) * spd, vy: Math.sin(a) * spd,
+                size, color: col, dmg: dmg * player.atk_increase,
+                life: 180, pierce, hitList: pierce ? [] : null
+            });
+        }, i * 50); // 0.05초 간격으로 발사되어 몬스터를 정통으로 때림
+    }
+}
+
+function handleAttacks() {
+    if (isPaused) return;
+    const target = getClosest();
+    const atkSpeedMult = player.atk_speed;
+
+    // 평타
+    if (frame % Math.floor(90 / atkSpeedMult) === 0 && target) {
+        fireGuidedProjectiles('basic', target, 9, 8, 15, false, '#fffb00');
+    }
+
+    // 파이어볼
+    let fbInt = player.skills.fireball === 10 ? 40 : 180;
+    if (player.skills.fireball > 0 && frame % Math.floor(fbInt/atkSpeedMult) === 0 && target) {
+        fireGuidedProjectiles('fireball', target, 6, 22, 40 + player.skills.fireball*5, true, '#ff4d00');
+    }
+
+    // 빔 (상하좌우 고정 방향이라 이전 로직 유지)
+    if (player.skills.beam > 0 && frame % Math.floor((player.skills.beam === 10 ? 90 : 180)/atkSpeedMult) === 0) {
+        const dirs = player.skills.beam === 10 ? [0, Math.PI/2, Math.PI, Math.PI*1.5] : (frame%360===0 ? [0, Math.PI] : [Math.PI/2, Math.PI*1.5]);
+        dirs.forEach(a => projectiles.push({ x: player.x, y: player.y, vx: Math.cos(a)*18, vy: Math.sin(a)*18, size: 12 + player.skills.beam*5, color: 'rgba(0, 255, 255, 0.7)', dmg: 60 * player.atk_increase, life: 15, pierce: true, hitList: [] }));
+    }
+
+    // 부메랑
+    if (player.skills.boomerang > 0 && frame % Math.floor((player.skills.boomerang === 10 ? 120 : 240)/atkSpeedMult) === 0 && target) {
+        let count = (player.skills.boomerang === 10 ? 3 : 1) + player.projectile_add;
+        for(let i=0; i<count; i++) projectiles.push({ type: 'boomerang', x: player.x, y: player.y, angle: Math.atan2(target.y-player.y, target.x-player.x) + (i*0.4), dist: 0, returning: false, dmg: 40 * player.atk_increase, life: 400, color: '#8bc34a', size: 16 });
+    }
+
+    // 표창
+    if (player.skills.shuriken > 0 && frame % Math.floor((player.skills.shuriken === 10 ? 15 : 120)/atkSpeedMult) === 0 && target) {
+        fireGuidedProjectiles('shuriken', target, 13, 10, 10, false, '#9e9e9e');
+    }
+}
+
+function update() {
+    if (isPaused || isGameOver) return;
+    frame++;
+
+    // 이동 및 경계선 제한 (더 강력하게 봉쇄)
+    let mx = 0, my = 0;
+    if (keys['KeyW'] || keys['ArrowUp']) my -= player.speed;
+    if (keys['KeyS'] || keys['ArrowDown']) my += player.speed;
+    if (keys['KeyA'] || keys['ArrowLeft']) mx -= player.speed;
+    if (keys['KeyD'] || keys['ArrowRight']) mx += player.speed;
+    
+    player.x = Math.max(15, Math.min(canvas.width - 15, player.x + mx));
+    player.y = Math.max(15, Math.min(canvas.height - 15, player.y + my));
+
+    handleAttacks();
+
+    // 몬스터 소환 (점진적)
+    if (frame % 50 === 0) {
+        const sec = (Date.now() - startTime - pausedTime) / 1000;
+        let spec = { hp: 40, spd: 1.4, size: 26, col: '#ff4d4d' };
+        const r = Math.random();
+        if (sec > 180 && r < 0.15) spec = { hp: 220, spd: 0.8, size: 48, col: '#4a148c' };
+        else if (sec > 120 && r < 0.2) spec = { hp: 80, spd: 1.2, size: 38, col: '#1b5e20' };
+        else if (sec > 60 && r < 0.25) spec = { hp: 25, spd: 2.8, size: 20, col: '#ffff00' };
+        const a = Math.random() * Math.PI * 2;
+        enemies.push({ id: Math.random(), x: player.x + Math.cos(a)*800, y: player.y + Math.sin(a)*800, ...spec, hitT: 0 });
+    }
+
+    // 보스 (5분)
+    if (frame > 0 && frame % 18000 === 0) enemies.push({ type: 'boss', x: player.x + 500, y: player.y, hp: 7000, spd: 0.7, size: 100, col: '#ff00ff', hitT: 0 });
+
+    // 투사체 로직
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+        const p = projectiles[i];
+        if (p.type === 'boomerang') {
+            if (!p.returning) { p.dist += 9; if(p.dist > 350) p.returning = true; }
+            else { p.dist -= 9; if(p.dist < 10) p.life = 0; }
+            p.x = player.x + Math.cos(p.angle) * p.dist; p.y = player.y + Math.sin(p.angle) * p.dist;
+        } else { p.x += p.vx; p.y += p.vy; }
+        if (--p.life <= 0) { projectiles.splice(i, 1); continue; }
+        for (let e of enemies) {
+            if (Math.hypot(p.x - e.x, p.y - e.y) < e.size/2 + p.size/2) {
+                if (p.pierce && p.hitList.includes(e.id)) continue;
+                e.hp -= p.dmg; e.hitT = 5; if (p.pierce) p.hitList.push(e.id); else p.life = 0;
+                if (e.hp <= 0) e.dead = true;
+            }
+        }
+    }
+
+    // 오오라 
+    if (player.skills.aura > 0 && frame % 20 === 0) {
+        const r = 80 + player.skills.aura * 25;
+        enemies.forEach(e => { if (Math.hypot(player.x - e.x, player.y - e.y) < r) { e.hp -= (12 + player.skills.aura * 5) * player.atk_increase; e.hitT = 5; if(e.hp <= 0) e.dead = true; } });
+    }
+
+    // 몬스터 업데이트 & 보스 보상
+    for (let i = enemies.length - 1; i >= 0; i--) {
+        const e = enemies[i];
+        const a = Math.atan2(player.y - e.y, player.x - e.x);
+        if (e.hitT > 0) e.hitT--; else { e.x += Math.cos(a)*e.spd; e.y += Math.sin(a)*e.spd; }
+        if (!player.invinc && Math.hypot(player.x - e.x, player.y - e.y) < e.size/2 + 13) {
+            player.hp--; player.invinc = true; setTimeout(() => player.invinc = false, 1000);
+            if (player.hp <= 0) { isGameOver = true; document.getElementById('survival-result').innerText = `${getPlayTime()} 생존`; document.getElementById('game-over').style.display = 'block'; }
+        }
+        if (e.dead) {
+            if (e.type === 'boss') showRewardModal("BOSS DEFEATED!");
+            else drops.push({ x: e.x, y: e.y, val: 25 });
+            enemies.splice(i, 1);
+        }
+    }
+
+    // 자석
+    for (let i = drops.length - 1; i >= 0; i--) {
+        const d = drops[i]; const dist = Math.hypot(player.x - d.x, player.y - d.y);
+        if (dist < player.magnet) { const spd = Math.max(player.speed + 5, (player.magnet - dist) * 0.3); const a = Math.atan2(player.y - d.y, player.x - d.x); d.x += Math.cos(a)*spd; d.y += Math.sin(a)*spd; }
+        if (dist < 20) { player.exp += d.val; if (player.exp >= player.nextExp) { player.level++; player.exp = 0; player.nextExp += 50; showRewardModal(); } drops.splice(i, 1); }
+    }
+    updateUI();
+}
+
+function updateUI() {
+    document.getElementById('timer').innerText = getPlayTime();
+    document.getElementById('hp-container').innerHTML = '❤️'.repeat(Math.max(0, player.hp));
+    document.getElementById('exp-bar').style.width = (player.exp/player.nextExp*100) + '%';
+    document.getElementById('lvl-txt').innerText = player.level;
+}
+
+function getPlayTime() {
+    let diff = Date.now() - startTime - pausedTime;
+    if (isPaused) diff = lastPauseStart - startTime - pausedTime;
+    let s = Math.floor(diff / 1000);
+    return `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
+}
+
+function getClosest() {
+    let closest = null, minD = 800;
+    enemies.forEach(e => { const d = Math.hypot(player.x - e.x, player.y - e.y); if (d < minD) { minD = d; closest = e; } });
+    return closest;
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (player.skills.aura > 0) {
+        const r = 80 + player.skills.aura * 25;
+        ctx.fillStyle = 'rgba(100,200,255,0.15)'; ctx.beginPath(); ctx.arc(player.x, player.y, r, 0, Math.PI*2); ctx.fill();
+    }
+    drops.forEach(d => { ctx.fillStyle = '#ffeb3b'; ctx.beginPath(); ctx.arc(d.x, d.y, 4, 0, Math.PI*2); ctx.fill(); });
+    enemies.forEach(e => { ctx.fillStyle = e.hitT > 0 ? '#fff' : e.col; ctx.beginPath(); ctx.arc(e.x, e.y, e.size/2, 0, Math.PI*2); ctx.fill(); if(e.type === 'boss') { ctx.strokeStyle = 'white'; ctx.lineWidth = 3; ctx.stroke(); } });
+    projectiles.forEach(p => { ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size/2, 0, Math.PI*2); ctx.fill(); });
+    ctx.fillStyle = player.invinc && Math.floor(frame/5)%2===0 ? '#ff0000' : '#00ff44';
+    ctx.fillRect(player.x - 15, player.y - 15, 30, 30);
+    requestAnimationFrame(() => { update(); draw(); });
+}
+
+window.addEventListener('keydown', e => {
+    if (e.code === 'Space') togglePause();
+    keys[e.code] = true;
+});
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+draw();
+</script>
+</body>
+</html>
