@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Water Sort: Mega Hell Edition</title>
+
+<style>
+:root {
+    --bg-color: #0f0f11;
+    --card-bg: #19191f;
+    --accent: #ff3366; 
+    --text: #eeeeee;
+}
+
+body {
+    margin: 0;
+    background: var(--bg-color);
+    color: var(--text);
+    text-align: center;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+}
+
+#ui {
+    padding: 15px;
+    background: var(--card-bg);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    font-weight: bold;
+}
+
+.btn {
+    background: #252530;
+    color: var(--text);
+    border: 1px solid #444;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.2s;
+}
+
+.btn:hover {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 0 10px var(--accent);
+}
+
+.btn-hell {
+    background: #4a0e17;
+    border-color: #ff3366;
+    color: #ff9999;
+}
+.btn-hell:hover {
+    background: #ff3366;
+    color: #fff;
+    box-shadow: 0 0 15px #ff3366;
+}
+
+.btn-group {
+    display: flex;
+    gap: 5px;
+    background: #0f0f11;
+    padding: 3px;
+    border-radius: 10px;
+}
+
+.stat-box {
+    font-size: 1.1rem;
+    color: #00adb5;
+    background: #111;
+    padding: 4px 10px;
+    border-radius: 6px;
+}
+
+canvas {
+    display: block;
+    margin: 20px auto 0;
+    background: #14141a;
+    border-radius: 16px;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.7);
+}
+
+#result-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(5px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+#result-overlay.show {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.result-box {
+    background: #191922;
+    padding: 40px 60px;
+    border-radius: 20px;
+    border: 2px solid #333;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    transform: scale(0.8);
+    transition: transform 0.3s ease;
+}
+
+#result-overlay.show .result-box {
+    transform: scale(1);
+}
+
+#result-title {
+    font-size: 2.5rem;
+    margin-bottom: 20px;
+    font-weight: 800;
+}
+
+#result-desc {
+    font-size: 1.2rem;
+    color: #aaa;
+    margin-bottom: 30px;
+}
+
+.tip-box {
+    font-size: 0.9rem;
+    color: #ff9f43;
+    background: #111;
+    padding: 8px 16px;
+    border-radius: 30px;
+    display: inline-block;
+}
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+    <span>모드 선택:</span>
+    <div class="btn-group">
+        <button class="btn" onclick="startGame(5,'easy')">쉬움</button>
+        <button class="btn" onclick="startGame(6,'normal')">보통</button>
+        <button class="btn" onclick="startGame(7,'hard')">어려움</button>
+        <button class="btn btn-hell" onclick="startGame(8,'hell')">존나어려움</button>
+    </div>
+
+    <button class="btn" style="border-color: #ff5722;" onclick="undo()">Undo</button>
+    <div class="stat-box" style="color: #ff9f43;">🎯 남은 이동: <span id="moves">0</span></div>
+    <div class="stat-box">⏱️ 시간: <span id="time">0</span>s</div>
+</div>
+
+<canvas id="game"></canvas>
+
+<div id="result-overlay">
+    <div class="result-box" id="result-box">
+        <div id="result-title">🎉 클리어 했네 추카 🎉</div>
+        <div id="result-desc">난이도에 따라 설명이 바뀝니다.</div>
+        <div class="tip-box">⌨️ [Spacebar]를 누르면 재시작합니다</div>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+function resize(){
+    canvas.width = Math.min(window.innerWidth - 40, 1100);
+    canvas.height = window.innerHeight - 120;
+}
+window.addEventListener("resize", resize);
+resize();
+
+let bottles = [];
+let history = [];
+let selected = null;
+let isAnimating = false; 
+
+// 💡 [수정] 뚜렷한 빨주노초파남보 + 8번째 핑크색 고대비 팔레트로 변경
+const colors = [
+    "#FF0000", // 1. 빨강 (Pure Red)
+    "#FF7F00", // 2. 주황 (Orange)
+    "#FFFF00", // 3. 노랑 (Yellow)
+    "#00FF00", // 4. 초록 (Lime Green)
+    "#0000FF", // 5. 파랑 (True Blue)
+    "#00FFFF", // 6. 남색/하늘 (Cyan) - 인디고보다 화면 가독성이 좋아 Cyan 선택
+    "#8B00FF", // 7. 보라 (Violet)
+    "#FF00FF"  // 8. 핑크 (Magenta - 8번째 병 전용)
+];
+
+let bottleSize = 7;
+let difficulty = "easy";
+let startTime = 0;
+let running = false;
+let loopId = null; 
+let moveLeft = 0; 
+let currentN = 5; 
+
+const bw = 48;         
+const liquidH = 32;     
+const spacing = 80;     
+
+function X(i) {
+    return canvas.width / 2 - (bottles.length * spacing) / 2 + i * spacing + (spacing - bw) / 2;
+}
+function Y() {
+    return canvas.height - 100;
+}
+
+canvas.addEventListener("click", click);
+
+window.addEventListener("keydown", (e) => {
+    if (e.code === "Space") {
+        const overlay = document.getElementById("result-overlay");
+        if (overlay.classList.contains("show")) {
+            e.preventDefault(); 
+            hideResult();
+            startGame(currentN, difficulty); 
+        }
+    }
+});
+
+function startGame(n, diff) {
+    if(isAnimating) return;
+
+    difficulty = diff;
+    currentN = n; 
+    bottles = [];
+    history = [];
+    selected = null;
+    hideResult(); 
+
+    const config = { easy: 7, normal: 8, hard: 9, hell: 10 };
+    bottleSize = config[diff];
+    
+    const moveConfig = { easy: 60, normal: 90, hard: 130, hell: 150 };
+    moveLeft = moveConfig[diff];
+    document.getElementById("moves").innerText = moveLeft;
+
+    for (let i = 0; i < n; i++) {
+        bottles.push(Array(bottleSize).fill(colors[i]));
+    }
+    bottles.push([]);
+    bottles.push([]);
+
+    for (let i = 0; i < 500; i++) {
+        let a = rand();
+        let b = rand();
+        moveRaw(a, b);
+    }
+
+    startTime = Date.now();
+    running = true;
+
+    if (!loopId) {
+        loopId = requestAnimationFrame(loop);
+    }
+}
+
+function rand() {
+    return Math.floor(Math.random() * bottles.length);
+}
+
+function moveRaw(a, b) {
+    if (a === b) return;
+    if (bottles[a].length === 0) return;
+    if (bottles[b].length >= bottleSize) return;
+
+    let c = bottles[a][bottles[a].length - 1];
+    bottles[a].pop();
+    bottles[b].push(c);
+}
+
+function click(e) {
+    if (!running || isAnimating) return; 
+
+    const r = canvas.getBoundingClientRect();
+    const x = e.clientX - r.left;
+    const y = e.clientY - r.top;
+
+    let idx = -1;
+    let h = bottleSize * liquidH;
+
+    for (let i = 0; i < bottles.length; i++) {
+        let bx = X(i);
+        let by = Y() - h;
+
+        if (x >= bx && x <= bx + bw && y >= by && y <= by + h) {
+            idx = i;
+            break;
+        }
+    }
+
+    if (idx === -1) {
+        selected = null;
+        return;
+    }
+
+    if (selected === null) {
+        if (bottles[idx].length > 0) selected = idx;
+    } else {
+        if (selected === idx) {
+            selected = null;
+        } else {
+            move(selected, idx);
+        }
+    }
+}
+
+function move(from, to) {
+    if (bottles[from].length === 0) { selected = null; return; }
+    if (bottles[to].length >= bottleSize) { selected = null; return; }
+
+    let c = bottles[from][bottles[from].length - 1];
+    if (bottles[to].length > 0 && bottles[to][bottles[to].length - 1] !== c) {
+        selected = null;
+        return;
+    }
+
+    let sameColorCount = 0;
+    for(let i = bottles[from].length - 1; i >= 0; i--) {
+        if(bottles[from][i] === c && (bottles[to].length + sameColorCount) < bottleSize) {
+            sameColorCount++;
+        } else {
+            break;
+        }
+    }
+
+    save();
+    
+    moveLeft--;
+    document.getElementById("moves").innerText = moveLeft;
+
+    animate(from, to, c, sameColorCount);
+    selected = null;
+}
+
+function animate(from, to, color, count) {
+    isAnimating = true;
+    let t = 0;
+
+    let renderBottles = JSON.parse(JSON.stringify(bottles));
+    for(let i=0; i<count; i++) renderBottles[from].pop();
+
+    let sx = X(from) + bw/2;
+    let sy = Y() - (renderBottles[from].length + count) * liquidH;
+    let ex = X(to) + bw/2;
+    let ey = Y() - renderBottles[to].length * liquidH - (liquidH/2);
+
+    function step() {
+        t += 0.06; 
+        drawExcluding(from, to, renderBottles);
+
+        ctx.save();
+        let angle = (from < to ? 1 : -1) * Math.min(t * 1.8, 1.2); 
+        ctx.translate(X(from) + bw/2, Y() - renderBottles[from].length*liquidH);
+        ctx.rotate(angle);
+        
+        ctx.save();
+        roundRect(ctx, -bw/2, -bottleSize*liquidH + renderBottles[from].length*liquidH, bw, bottleSize*liquidH, 12, false, false);
+        ctx.clip(); 
+        for(let j=0; j<renderBottles[from].length; j++) {
+            let isTop = (j === renderBottles[from].length - 1);
+            ctx.fillStyle = (difficulty === "hell" && !isTop) ? "#3a3a45" : renderBottles[from][j];
+            ctx.fillRect(-bw/2, -liquidH*(j+1) + renderBottles[from].length*liquidH, bw, liquidH);
+            
+            if (difficulty === "hell" && !isTop) {
+                drawQuestionMark(ctx, 0, -liquidH*(j+1) + renderBottles[from].length*liquidH + liquidH/2);
+            }
+        }
+        ctx.restore();
+
+        ctx.strokeStyle = difficulty === "hell" ? "rgba(255, 51, 102, 0.8)" : "rgba(255,255,255,0.8)";
+        ctx.lineWidth = 3;
+        roundRect(ctx, -bw/2, -bottleSize*liquidH + renderBottles[from].length*liquidH, bw, bottleSize*liquidH, 12, false, true);
+        ctx.restore();
+
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 6;
+        ctx.lineCap = "round";
+        ctx.moveTo(sx, sy);
+        let cpX = (sx + ex) / 2;
+        let cpY = Math.min(sy, ey) - 50;
+        ctx.quadraticCurveTo(cpX, cpY, sx + (ex - sx) * Math.min(t*1.3, 1), sy + (ey - sy) * Math.min(t*1.3, 1));
+        ctx.stroke();
+
+        ctx.save();
+        ctx.save();
+        roundRect(ctx, X(to), Y() - bottleSize*liquidH, bw, bottleSize*liquidH, 12, false, false);
+        ctx.clip();
+        for(let j=0; j<renderBottles[to].length; j++) {
+            let isTop = (j === renderBottles[to].length - 1);
+            ctx.fillStyle = (difficulty === "hell" && !isTop) ? "#3a3a45" : renderBottles[to][j];
+            ctx.fillRect(X(to), Y() - liquidH*(j+1), bw, liquidH);
+            if (difficulty === "hell" && !isTop) {
+                drawQuestionMark(ctx, X(to) + bw/2, Y() - liquidH*(j+1) + liquidH/2);
+            }
+        }
+        if(t > 0.4) {
+            let fillProgress = Math.min((t - 0.4) / 0.6, 1);
+            ctx.fillStyle = color;
+            ctx.fillRect(X(to), Y() - renderBottles[to].length*liquidH - (liquidH * count * fillProgress), bw, liquidH * count * fillProgress);
+        }
+        ctx.restore();
+
+        ctx.strokeStyle = difficulty === "hell" ? "rgba(255, 51, 102, 0.8)" : "rgba(255,255,255,0.8)";
+        ctx.lineWidth = 3;
+        roundRect(ctx, X(to), Y() - bottleSize*liquidH, bw, bottleSize*liquidH, 12, false, true);
+        ctx.restore();
+
+        if (t >= 1.2) {
+            for(let i=0; i<count; i++) {
+                bottles[from].pop();
+                bottles[to].push(color);
+            }
+            isAnimating = false;
+            checkWinOrLose(); 
+            return;
+        }
+        requestAnimationFrame(step);
+    }
+    step();
+}
+
+function save() {
+    history.push(JSON.stringify({bottles: bottles, moveLeft: moveLeft}));
+}
+
+function undo() {
+    if (history.length === 0 || isAnimating) return;
+    let state = JSON.parse(history.pop());
+    bottles = state.bottles;
+    moveLeft = state.moveLeft;
+    document.getElementById("moves").innerText = moveLeft;
+    selected = null;
+    draw();
+}
+
+function loop() {
+    if (!running) {
+        loopId = null;
+        return;
+    }
+    update();
+    if(!isAnimating) draw(); 
+    loopId = requestAnimationFrame(loop);
+}
+
+function update() {
+    let sec = Math.floor((Date.now() - startTime) / 1000);
+    document.getElementById("time").innerText = sec;
+}
+
+function drawQuestionMark(context, cx, cy) {
+    context.save();
+    context.fillStyle = "rgba(255,255,255,0.45)"; // 물음표 가독성도 살짝 업그레이드
+    context.font = "bold 15px Arial";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText("?", cx, cy);
+    context.restore();
+}
+
+function drawExcluding(ex1, ex2, customBottles) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let h = bottleSize * liquidH;
+
+    for (let i = 0; i < bottles.length; i++) {
+        if(i === ex1 || i === ex2) continue; 
+
+        let x = X(i);
+        let y = Y();
+
+        if (i === selected) {
+            ctx.strokeStyle = "#ff3366";
+            ctx.lineWidth = 4;
+            ctx.shadowColor = "#ff3366";
+            ctx.shadowBlur = 15;
+            roundRect(ctx, x - 4, y - h - 4, bw + 8, h + 8, 15, false, true);
+            ctx.shadowBlur = 0; 
+        }
+
+        ctx.save(); 
+        roundRect(ctx, x, y - h, bw, h, 12, false, false); 
+        ctx.clip(); 
+
+        for (let j = 0; j < bottles[i].length; j++) {
+            let isTop = (j === bottles[i].length - 1);
+            
+            if (difficulty === "hell") {
+                ctx.fillStyle = isTop ? bottles[i][j] : "#3a3a45"; 
+                ctx.fillRect(x, y - liquidH * (j + 1), bw, liquidH);
+                if(!isTop) {
+                    drawQuestionMark(ctx, x + bw/2, y - liquidH * (j + 1) + liquidH/2);
+                }
+            } else {
+                ctx.fillStyle = bottles[i][j];
+                ctx.fillRect(x, y - liquidH * (j + 1), bw, liquidH);
+            }
+        }
+        ctx.restore(); 
+
+        ctx.strokeStyle = difficulty === "hell" ? "rgba(255, 51, 102, 0.4)" : "rgba(255, 255, 255, 0.25)";
+        ctx.lineWidth = 3;
+        roundRect(ctx, x, y - h, bw, h, 12, false, true);
+    }
+}
+
+function draw() {
+    drawExcluding(-1, -1, bottles);
+}
+
+function roundRect(ctx, x, y, width, height, radius, fill, stroke) {
+    if (typeof radius === 'number') {
+        radius = {tl: radius, tr: radius, bl: radius, br: radius};
+    }
+    ctx.beginPath();
+    ctx.moveTo(x + radius.tl, y);
+    ctx.lineTo(x + width - radius.tr, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius.tr);
+    ctx.lineTo(x + width, y + height - radius.br);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius.br, y + height);
+    ctx.lineTo(x + radius.bl, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius.bl);
+    ctx.lineTo(x + radius.tl, y);
+    ctx.quadraticCurveTo(x, y, x + radius.tl, y);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
+}
+
+function showResult(title, desc, isWin) {
+    const overlay = document.getElementById("result-overlay");
+    const titleEl = document.getElementById("result-title");
+    const descEl = document.getElementById("result-desc");
+    const boxEl = document.getElementById("result-box");
+
+    titleEl.innerText = title;
+    descEl.innerText = desc;
+    
+    if (isWin) {
+        titleEl.style.color = "#26de81";
+        boxEl.style.borderColor = "#26de81";
+    } else {
+        titleEl.style.color = "#ff4d5a";
+        boxEl.style.borderColor = "#ff4d5a";
+    }
+
+    overlay.classList.add("show");
+}
+
+function hideResult() {
+    document.getElementById("result-overlay").classList.remove("show");
+}
+
+function checkWinOrLose() {
+    let win = true;
+    for (let b of bottles) {
+        if (b.length === 0) continue;
+        if (b.length !== bottleSize) { win = false; break; }
+        if (!b.every(c => c === b[0])) { win = false; break; }
+    }
+
+    if(win) {
+        running = false;
+        let title = difficulty === "hell" ? "💀 오메 어캐 했누;;; 💀" : "🎉 클리어 했네 추카 🎉";
+        let desc = `경과 시간: ${document.getElementById("time").innerText}초 | 남은 이동 횟수: ${moveLeft}회`;
+        setTimeout(() => showResult(title, desc, true), 150);
+        return;
+    }
+
+    if (moveLeft <= 0) {
+        running = false;
+        let title = "💥 Game Over 💥";
+        let desc = "이동 횟수를 모두 소진했습니다. 다음 기회에!";
+        setTimeout(() => showResult(title, desc, false), 150);
+    }
+}
+
+startGame(5, 'easy');
+</script>
+
+</body>
+</html>
